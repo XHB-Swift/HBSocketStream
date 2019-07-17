@@ -40,6 +40,7 @@ NSString *const HBTCPAddressData = @"tcp-data";
 - (instancetype)init {
     
     if (self = [super init]) {
+        _socketFD = HBSOCKNULL;
         _threadsPool = [NSMutableArray array];
         _defaultSSLSetting = [NSMutableDictionary dictionary];
     }
