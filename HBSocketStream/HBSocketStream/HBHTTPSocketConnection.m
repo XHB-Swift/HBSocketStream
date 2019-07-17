@@ -129,6 +129,7 @@
 
 @interface HBHTTPSocketConnection () <HBHTTPSocketConnectionTaskDelegate>
 
+@property (nonatomic, strong) dispatch_queue_t socketConnectionQueue;
 @property (nonatomic, strong) NSMutableArray<HBHTTPSocketConnectionTask *> *tasks;
 
 @end
@@ -139,50 +140,59 @@
     
     if (self = [super init]) {
         _tasks = [NSMutableArray array];
+        _socketConnectionQueue = dispatch_queue_create("com.xhb.socket.connection", DISPATCH_QUEUE_SERIAL);
     }
     return self;
 }
 
 - (void)setSocketConnectionRequests:(NSArray<NSURLRequest *> *)requests {
-    if (requests.count) {
-        NSArray<NSURLRequest *> *internalRequests = [NSArray arrayWithArray:requests];
-        [internalRequests enumerateObjectsUsingBlock:^(NSURLRequest * _Nonnull request, NSUInteger idx, BOOL * _Nonnull stop) {
-            @synchronized (self.tasks) {
-                HBHTTPSocketConnectionTask *task = [[HBHTTPSocketConnectionTask alloc] initWithRequest:request];
-                task.connectionTaskDelegate = self;
-                [self.tasks addObject:task];
-            }
-        }];
-    }
+    dispatch_async(self.socketConnectionQueue, ^{
+        if (requests.count) {
+            NSArray<NSURLRequest *> *internalRequests = [NSArray arrayWithArray:requests];
+            [internalRequests enumerateObjectsUsingBlock:^(NSURLRequest * _Nonnull request, NSUInteger idx, BOOL * _Nonnull stop) {
+                @synchronized (self.tasks) {
+                    HBHTTPSocketConnectionTask *task = [[HBHTTPSocketConnectionTask alloc] initWithRequest:request];
+                    task.connectionTaskDelegate = self;
+                    [self.tasks addObject:task];
+                }
+            }];
+        }
+    });
 }
 
 - (void)start {
-    NSArray<HBHTTPSocketConnectionTask *> *startedTasks = [NSArray arrayWithArray:self.tasks];
-    [startedTasks enumerateObjectsUsingBlock:^(HBHTTPSocketConnectionTask * _Nonnull task, NSUInteger idx, BOOL * _Nonnull stop) {
-        [task startTask];
-    }];
+    dispatch_async(self.socketConnectionQueue, ^{
+        NSArray<HBHTTPSocketConnectionTask *> *startedTasks = [NSArray arrayWithArray:self.tasks];
+        [startedTasks enumerateObjectsUsingBlock:^(HBHTTPSocketConnectionTask * _Nonnull task, NSUInteger idx, BOOL * _Nonnull stop) {
+            [task startTask];
+        }];
+    });
 }
 
 - (void)startAtRequestIndex:(NSUInteger)requestIndex {
-    NSUInteger taskCount = self.tasks.count;
-    if (taskCount > requestIndex) {
-        HBHTTPSocketConnectionTask *task = [self.tasks objectAtIndex:requestIndex];
-        [task startTask];
-    }
+    dispatch_async(self.socketConnectionQueue, ^{
+        NSUInteger taskCount = self.tasks.count;
+        if (taskCount > requestIndex) {
+            HBHTTPSocketConnectionTask *task = [self.tasks objectAtIndex:requestIndex];
+            [task startTask];
+        }
+    });
 }
 
 - (void)addNewRequestsAndStart:(NSArray<NSURLRequest *> *)requests {
-    if (requests.count) {
-        NSArray<NSURLRequest *> *newRequests = [NSArray arrayWithArray:requests];
-        [newRequests enumerateObjectsUsingBlock:^(NSURLRequest * _Nonnull newRequest, NSUInteger idx, BOOL * _Nonnull stop) {
-            @synchronized (self.tasks) {
-                HBHTTPSocketConnectionTask *task = [[HBHTTPSocketConnectionTask alloc] initWithRequest:newRequest];
-                task.connectionTaskDelegate = self;
-                [self.tasks addObject:task];
-                [task startTask];
-            }
-        }];
-    }
+    dispatch_async(self.socketConnectionQueue, ^{
+        if (requests.count) {
+            NSArray<NSURLRequest *> *newRequests = [NSArray arrayWithArray:requests];
+            [newRequests enumerateObjectsUsingBlock:^(NSURLRequest * _Nonnull newRequest, NSUInteger idx, BOOL * _Nonnull stop) {
+                @synchronized (self.tasks) {
+                    HBHTTPSocketConnectionTask *task = [[HBHTTPSocketConnectionTask alloc] initWithRequest:newRequest];
+                    task.connectionTaskDelegate = self;
+                    [self.tasks addObject:task];
+                    [task startTask];
+                }
+            }];
+        }
+    });
 }
 
 - (HBHTTPSerializer *)httpSerializerAtRequestIndex:(NSUInteger)requestIndex {
@@ -212,6 +222,9 @@
     if (self.connectionDelegate && [self.connectionDelegate respondsToSelector:@selector(socketConnection:didCompleteWithError:atRequestIndex:)]) {
         [self.connectionDelegate socketConnection:self didCompleteWithError:error atRequestIndex:[self.tasks indexOfObject:connectionTask]];
     }
+    dispatch_async(self.socketConnectionQueue, ^{
+        [self.tasks removeObject:connectionTask];
+    });
 }
 
 @end
